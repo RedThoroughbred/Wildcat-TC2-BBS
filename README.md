@@ -1,8 +1,24 @@
-# TC²-BBS Meshtastic Version
+# Wildcat TC²-BBS - Northern Kentucky Mesh
+
+> **Based on [TC²-BBS by TheCommsChannel](https://github.com/TheCommsChannel/TC2-BBS-mesh)**
+> This is a customized version with additional features for the Northern Kentucky / Cincinnati mesh network.
+
+## Custom Features Added
+
+- **🌤️ Interactive Weather** - Users enter their ZIP code for live local weather (OpenWeatherMap API)
+- **📡 Network Info Menu** - Live mesh stats (nodes online, signal reports, hardware breakdown)
+- **📚 Resources Menu** - Meshtastic guides, hardware recommendations, official docs, AI assistant
+- **🤖 NotebookLM Integration** - Link to interactive AI Meshtastic guide
+- **💬 25+ Mesh-Themed Quotes** - Inspirational messages about decentralized networks
+- **🏷️ Custom Branding** - "Wildcat TC² BBS" for Northern Kentucky identity
+
+---
+
+## About TC²-BBS
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/B0B1OZ22Z)
 
-This is the TC²-BBS system integrated with Meshtastic devices. The system allows for message handling, bulletin boards, mail systems, and a channel directory.
+TC²-BBS is a bulletin board system integrated with Meshtastic devices. The system allows for message handling, bulletin boards, mail systems, and a channel directory.
 
 ### Docker
 
