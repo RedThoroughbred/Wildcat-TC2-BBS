@@ -7,6 +7,8 @@ Wants=network-online.target
 Type=simple
 Restart=always
 RestartSec=20
+# Auto-restart every 10 minutes to prevent serial connection issues
+RuntimeMaxSec=600
 User=seth
 WorkingDirectory=/home/seth/TC2-BBS-mesh
 ExecStart=/usr/bin/python3 /home/seth/TC2-BBS-mesh/server.py
