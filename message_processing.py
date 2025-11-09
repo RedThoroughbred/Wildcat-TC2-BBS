@@ -8,16 +8,21 @@ from command_handlers import (
     handle_channel_directory_command, handle_channel_directory_steps, handle_send_mail_command,
     handle_read_mail_command, handle_check_mail_command, handle_delete_mail_confirmation, handle_post_bulletin_command,
     handle_check_bulletin_command, handle_read_bulletin_command, handle_read_channel_command,
-    handle_post_channel_command, handle_list_channels_command, handle_quick_help_command
+    handle_post_channel_command, handle_list_channels_command, handle_quick_help_command,
+    handle_network_info_command, handle_network_info_steps, handle_resources_command, handle_resources_steps,
+    handle_weather_command, handle_weather_steps
 )
 from db_operations import add_bulletin, add_mail, delete_bulletin, delete_mail, get_db_connection, add_channel
 from js8call_integration import handle_js8call_command, handle_js8call_steps, handle_group_message_selection
 from utils import get_user_state, get_node_short_name, get_node_id_from_num, send_message
 
 main_menu_handlers = {
-    "q": handle_quick_help_command,
-    "b": lambda sender_id, interface: handle_help_command(sender_id, interface, 'bbs'),
-    "u": lambda sender_id, interface: handle_help_command(sender_id, interface, 'utilities'),
+    "w": handle_weather_command,
+    "n": handle_network_info_command,
+    "m": handle_mail_command,
+    "b": handle_bulletin_command,
+    "r": handle_resources_command,
+    "q": handle_fortune_command,
     "x": handle_help_command
 }
 
@@ -129,49 +134,72 @@ def process_message(sender_id, message, interface, is_sync_message=False):
                 handle_help_command(sender_id, interface)
                 return
 
-            if message_lower in handlers:
-                if state and state['command'] in ['BULLETIN_ACTION', 'BULLETIN_READ', 'BULLETIN_POST', 'BULLETIN_POST_CONTENT']:
-                    handlers[message_lower](sender_id, interface, state)
-                else:
-                    handlers[message_lower](sender_id, interface)
-            elif state:
+            # Check state-based commands FIRST (submenus have priority)
+            if state:
                 command = state['command']
                 step = state['step']
 
-                if command == 'MAIL':
+                if command == 'NETWORK_INFO':
+                    handle_network_info_steps(sender_id, message, step, state, interface)
+                    return
+                elif command == 'RESOURCES':
+                    handle_resources_steps(sender_id, message, step, state, interface)
+                    return
+                elif command == 'WEATHER':
+                    handle_weather_steps(sender_id, message, step, state, interface)
+                    return
+                elif command == 'MAIL':
                     handle_mail_steps(sender_id, message, step, state, interface, bbs_nodes)
+                    return
                 elif command == 'BULLETIN':
                     handle_bb_steps(sender_id, message, step, state, interface, bbs_nodes)
+                    return
                 elif command == 'STATS':
                     handle_stats_steps(sender_id, message, step, interface)
+                    return
                 elif command == 'CHANNEL_DIRECTORY':
                     handle_channel_directory_steps(sender_id, message, step, state, interface)
+                    return
                 elif command == 'CHECK_MAIL':
                     if step == 1:
                         handle_read_mail_command(sender_id, message, state, interface)
                     elif step == 2:
                         handle_delete_mail_confirmation(sender_id, message, state, interface, bbs_nodes)
+                    return
                 elif command == 'CHECK_BULLETIN':
                     if step == 1:
                         handle_read_bulletin_command(sender_id, message, state, interface)
+                    return
                 elif command == 'CHECK_CHANNEL':
                     if step == 1:
                         handle_read_channel_command(sender_id, message, state, interface)
+                    return
                 elif command == 'LIST_CHANNELS':
                     if step == 1:
                         handle_read_channel_command(sender_id, message, state, interface)
+                    return
                 elif command == 'BULLETIN_POST':
                     handle_bb_steps(sender_id, message, 4, state, interface, bbs_nodes)
+                    return
                 elif command == 'BULLETIN_POST_CONTENT':
                     handle_bb_steps(sender_id, message, 5, state, interface, bbs_nodes)
+                    return
                 elif command == 'BULLETIN_READ':
                     handle_bb_steps(sender_id, message, 3, state, interface, bbs_nodes)
+                    return
                 elif command == 'JS8CALL_MENU':
                     handle_js8call_steps(sender_id, message, step, interface, state)
+                    return
                 elif command == 'GROUP_MESSAGES':
                     handle_group_message_selection(sender_id, message, step, state, interface)
+                    return
+
+            # Now check menu handlers (for main menu navigation)
+            if message_lower in handlers:
+                if state and state['command'] in ['BULLETIN_ACTION', 'BULLETIN_READ', 'BULLETIN_POST', 'BULLETIN_POST_CONTENT']:
+                    handlers[message_lower](sender_id, interface, state)
                 else:
-                    handle_help_command(sender_id, interface)
+                    handlers[message_lower](sender_id, interface)
             else:
                 handle_help_command(sender_id, interface)
 

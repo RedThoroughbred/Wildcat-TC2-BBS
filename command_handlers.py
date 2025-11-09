@@ -2,6 +2,8 @@ import configparser
 import logging
 import random
 import time
+import requests
+import json
 
 from meshtastic import BROADCAST_NUM
 
@@ -29,13 +31,22 @@ utilities_menu_items = config['menu']['utilities_menu_items'].split(',')
 def build_menu(items, menu_name):
     menu_str = f"{menu_name}\n"
     for item in items:
-        if item.strip() == 'Q':
-            menu_str += "[Q]uick Commands\n"
+        if item.strip() == 'W':
+            menu_str += "[W]eather\n"
+        elif item.strip() == 'N':
+            menu_str += "[N]etwork Info\n"
+        elif item.strip() == 'Q':
+            if "BBS" in menu_name or "💾" in menu_name:
+                menu_str += "[Q]uote\n"
+            else:
+                menu_str += "[Q]uick Commands\n"
+        elif item.strip() == 'R':
+            menu_str += "[R]esources\n"
         elif item.strip() == 'B':
             if menu_name == "📰BBS Menu📰":
                 menu_str += "[B]ulletins\n"
             else:
-                menu_str += "[B]BS\n"
+                menu_str += "[B]ulletins\n"
         elif item.strip() == 'U':
             menu_str += "[U]tilities\n"
         elif item.strip() == 'X':
@@ -64,7 +75,7 @@ def handle_help_command(sender_id, interface, menu_name=None):
     else:
         update_user_state(sender_id, {'command': 'MAIN_MENU', 'step': 1})  # Reset to main menu state
         mail = get_mail(get_node_id_from_num(sender_id, interface))
-        response = build_menu(main_menu_items, f"💾TC² BBS💾 (✉️:{len(mail)})")
+        response = build_menu(main_menu_items, f"💾Wildcat TC² BBS💾 (✉️:{len(mail)})")
     send_message(response, sender_id, interface)
 
 def get_node_name(node_id, interface):
@@ -665,3 +676,219 @@ def handle_quick_help_command(sender_id, interface):
     response = ("✈️QUICK COMMANDS✈️\nSend command below for usage info:\nSM,, - Send "
                 "Mail\nCM - Check Mail\nPB,, - Post Bulletin\nCB,, - Check Bulletins\n")
     send_message(response, sender_id, interface)
+
+
+def handle_network_info_command(sender_id, interface):
+    """Network info menu"""
+    response = "📡Network Info📡\nWhat info would you like?\n[N]odes  [S]ignals  [M]esh Health  E[X]IT"
+    send_message(response, sender_id, interface)
+    update_user_state(sender_id, {'command': 'NETWORK_INFO', 'step': 1})
+
+
+def handle_network_info_steps(sender_id, message, step, state, interface):
+    """Handle network info submenu selections"""
+    choice = message.lower().strip()
+    if len(choice) == 2 and choice[1] == 'x':
+        choice = choice[0]
+
+    if choice == 'n':
+        # Nodes online
+        nodes = interface.nodes
+        total_nodes = len(nodes)
+
+        response = f"📡 Mesh Network Status 📡\n\nTotal Nodes: {total_nodes}\n\nRecent Nodes:\n"
+
+        # Sort by last heard (most recent first)
+        sorted_nodes = sorted(nodes.items(),
+                            key=lambda x: x[1].get('lastHeard', 0) if isinstance(x[1], dict) else 0,
+                            reverse=True)
+
+        for i, (node_id, node_data) in enumerate(sorted_nodes[:10]):  # Show top 10
+            if isinstance(node_data, dict) and 'user' in node_data:
+                short_name = node_data['user'].get('shortName', 'UNK')
+                long_name = node_data['user'].get('longName', 'Unknown')
+                response += f"{i+1}. {short_name} - {long_name}\n"
+
+        if total_nodes > 10:
+            response += f"\n...and {total_nodes - 10} more nodes"
+
+        send_message(response, sender_id, interface)
+        update_user_state(sender_id, None)
+
+    elif choice == 's':
+        # Signal reports
+        response = "📶 Signal Reports 📶\n\nRecent SNR readings:\n"
+
+        nodes = interface.nodes
+        signal_nodes = []
+
+        for node_id, node_data in nodes.items():
+            if isinstance(node_data, dict) and 'snr' in node_data:
+                short_name = node_data.get('user', {}).get('shortName', 'UNK')
+                snr = node_data.get('snr', 0)
+                signal_nodes.append((short_name, snr))
+
+        # Sort by SNR (best first)
+        signal_nodes.sort(key=lambda x: x[1], reverse=True)
+
+        for i, (name, snr) in enumerate(signal_nodes[:10]):
+            response += f"{name}: {snr:.1f} dB\n"
+
+        if not signal_nodes:
+            response = "No signal data available yet."
+
+        send_message(response, sender_id, interface)
+        update_user_state(sender_id, None)
+
+    elif choice == 'm':
+        # Mesh health
+        nodes = interface.nodes
+        total = len(nodes)
+
+        response = f"🏥 Mesh Health 🏥\n\n"
+        response += f"Total Nodes: {total}\n"
+
+        # Count by hardware type
+        hw_types = {}
+        for node_id, node_data in nodes.items():
+            if isinstance(node_data, dict) and 'user' in node_data:
+                hw = node_data['user'].get('hwModel', 'UNKNOWN')
+                hw_types[hw] = hw_types.get(hw, 0) + 1
+
+        response += f"\nHardware Types:\n"
+        for hw, count in sorted(hw_types.items(), key=lambda x: x[1], reverse=True)[:5]:
+            response += f"{hw}: {count}\n"
+
+        send_message(response, sender_id, interface)
+        update_user_state(sender_id, None)
+
+    elif choice == 'x':
+        handle_help_command(sender_id, interface)
+    else:
+        send_message("Invalid option. Please try again.", sender_id, interface)
+
+
+def handle_resources_command(sender_id, interface):
+    """Resources menu"""
+    response = "📚Resources📚\nWhat info do you need?\n[G]uide  [H]ardware  [L]inks  [A]I Guide  E[X]IT"
+    send_message(response, sender_id, interface)
+    update_user_state(sender_id, {'command': 'RESOURCES', 'step': 1})
+
+
+def handle_resources_steps(sender_id, message, step, state, interface):
+    """Handle resources submenu selections"""
+    choice = message.lower().strip()
+    if len(choice) == 2 and choice[1] == 'x':
+        choice = choice[0]
+
+    if choice == 'g':
+        # Getting started guide
+        response = ("📖 Getting Started 📖\n\n"
+                   "New to mesh?\n"
+                   "• Change your node name in settings\n"
+                   "• Set up channels to join groups\n"
+                   "• Add friends by their node ID\n"
+                   "• Adjust transmit power for range\n"
+                   "• Use CLIENT role for mobile nodes\n"
+                   "• Use CLIENT_MUTE for base stations\n\n"
+                   "Learn more: meshtastic.org/docs")
+        send_message(response, sender_id, interface)
+        update_user_state(sender_id, None)
+
+    elif choice == 'h':
+        # Hardware recommendations
+        response = ("🔧 Recommended Hardware 🔧\n\n"
+                   "Portable:\n"
+                   "- Heltec V3 ($30)\n"
+                   "- T-Beam ($40)\n"
+                   "- RAK WisBlock ($50)\n\n"
+                   "Base Station:\n"
+                   "- Station G2 ($100)\n"
+                   "- RAK Base ($100)\n\n"
+                   "Tracker:\n"
+                   "- T1000-E ($30-40)\n\n"
+                   "Info: meshtastic.org/docs/hardware")
+        send_message(response, sender_id, interface)
+        update_user_state(sender_id, None)
+
+    elif choice == 'l':
+        # Useful links
+        response = ("🔗 Useful Links 🔗\n\n"
+                   "Main Site:\n"
+                   "meshtastic.org\n\n"
+                   "Documentation:\n"
+                   "meshtastic.org/docs\n\n"
+                   "Discord:\n"
+                   "discord.gg/meshtastic\n\n"
+                   "Reddit:\n"
+                   "r/meshtastic")
+        send_message(response, sender_id, interface)
+        update_user_state(sender_id, None)
+
+    elif choice == 'a':
+        # AI Guide - NotebookLM
+        response = ("🤖 AI Meshtastic Guide 🤖\n\n"
+                   "Interactive AI assistant for Meshtastic help.\n\n"
+                   "notebooklm.google.com/notebook/ebf5b4fd-2074-4160-a9c9-996155209bb8")
+        send_message(response, sender_id, interface)
+        update_user_state(sender_id, None)
+
+    elif choice == 'x':
+        handle_help_command(sender_id, interface)
+    else:
+        send_message("Invalid option. Please try again.", sender_id, interface)
+
+
+
+def handle_weather_command(sender_id, interface):
+    """Prompt user for zip code"""
+    response = "☁️ Weather ☁️\n\nEnter your 5-digit ZIP code:"
+    send_message(response, sender_id, interface)
+    update_user_state(sender_id, {'command': 'WEATHER', 'step': 1})
+
+
+def handle_weather_steps(sender_id, message, step, state, interface):
+    """Handle weather zip code input"""
+    if step == 1:
+        zip_code = message.strip()
+
+        # Validate zip code
+        if not zip_code.isdigit() or len(zip_code) != 5:
+            send_message("Invalid ZIP code. Please enter a 5-digit ZIP code.", sender_id, interface)
+            return
+
+        try:
+            api_key = "b5f7bc717799c13af6c652a35002edd6"
+            country_code = "us"
+
+            # Get current weather
+            url = f"http://api.openweathermap.org/data/2.5/weather?zip={zip_code},{country_code}&appid={api_key}&units=imperial"
+            response = requests.get(url, timeout=5)
+
+            if response.status_code == 200:
+                data = response.json()
+
+                temp = data["main"]["temp"]
+                feels_like = data["main"]["feels_like"]
+                humidity = data["main"]["humidity"]
+                conditions = data["weather"][0]["description"].title()
+                city = data["name"]
+                state_code = data.get("sys", {}).get("country", "")
+
+                weather_msg = (f"☁️ {city} Weather ☁️\n\n"
+                              f"Temp: {temp:.0f}°F (feels {feels_like:.0f}°F)\n"
+                              f"Conditions: {conditions}\n"
+                              f"Humidity: {humidity}%")
+
+                send_message(weather_msg, sender_id, interface)
+            elif response.status_code == 404:
+                send_message("ZIP code not found. Please try again.", sender_id, interface)
+            else:
+                send_message("Unable to get weather at this time.", sender_id, interface)
+
+        except Exception as e:
+            logging.error(f"Error getting weather: {e}")
+            send_message("Weather service unavailable.", sender_id, interface)
+
+        update_user_state(sender_id, None)
+

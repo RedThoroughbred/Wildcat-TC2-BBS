@@ -1,0 +1,15 @@
+[Unit]
+Description=TC²-BBS Meshtastic Version (Heltec V3)
+After=multi-user.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=20
+User=seth
+WorkingDirectory=/home/seth/TC2-BBS-mesh
+ExecStart=/usr/bin/python3 /home/seth/TC2-BBS-mesh/server.py
+
+[Install]
+WantedBy=multi-user.target
