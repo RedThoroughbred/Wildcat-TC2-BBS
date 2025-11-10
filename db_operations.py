@@ -48,6 +48,18 @@ def initialize_database():
                     name TEXT NOT NULL,
                     url TEXT NOT NULL
                 );''')
+    c.execute('''CREATE TABLE IF NOT EXISTS message_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    sender_short_name TEXT NOT NULL,
+                    to_id INTEGER NOT NULL,
+                    channel_index INTEGER,
+                    message TEXT NOT NULL,
+                    snr REAL,
+                    rssi INTEGER,
+                    hop_limit INTEGER
+                );''')
     conn.commit()
     print("Database schema initialized.")
 
@@ -164,3 +176,194 @@ def get_sender_id_by_mail_id(mail_id):
     if result:
         return result[0]
     return None
+
+
+def log_message(sender_id, sender_short_name, to_id, message, timestamp, channel_index=0, snr=None, rssi=None, hop_limit=None):
+    """Log a message to the database for analytics"""
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO message_logs (timestamp, sender_id, sender_short_name, to_id, channel_index, message, snr, rssi, hop_limit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (timestamp, sender_id, sender_short_name, to_id, channel_index, message, snr, rssi, hop_limit))
+        conn.commit()
+    except Exception as e:
+        logging.error(f"Error logging message: {e}")
+
+
+def get_channel_activity_stats(hours=24):
+    """Get message count by channel for the last N hours"""
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        import time
+        cutoff_time = int(time.time()) - (hours * 3600)
+        
+        c.execute("""
+            SELECT channel_index, COUNT(*) as count 
+            FROM message_logs 
+            WHERE timestamp >= ? 
+            GROUP BY channel_index 
+            ORDER BY count DESC
+        """, (cutoff_time,))
+        
+        return c.fetchall()
+    except Exception as e:
+        logging.error(f"Error getting channel activity: {e}")
+        return []
+
+
+def get_message_stats(hours=24):
+    """Get general message statistics"""
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        import time
+        cutoff_time = int(time.time()) - (hours * 3600)
+        
+        # Total messages
+        c.execute("SELECT COUNT(*) FROM message_logs WHERE timestamp >= ?", (cutoff_time,))
+        total = c.fetchone()[0]
+        
+        # Messages by sender
+        c.execute("""
+            SELECT sender_short_name, COUNT(*) as count 
+            FROM message_logs 
+            WHERE timestamp >= ? 
+            GROUP BY sender_short_name 
+            ORDER BY count DESC 
+            LIMIT 10
+        """, (cutoff_time,))
+        top_senders = c.fetchall()
+        
+        # Average SNR
+        c.execute("SELECT AVG(snr) FROM message_logs WHERE timestamp >= ? AND snr IS NOT NULL", (cutoff_time,))
+        avg_snr = c.fetchone()[0]
+        
+        return {
+            'total': total,
+            'top_senders': top_senders,
+            'avg_snr': avg_snr if avg_snr else 0
+        }
+    except Exception as e:
+        logging.error(f"Error getting message stats: {e}")
+        return {'total': 0, 'top_senders': [], 'avg_snr': 0}
+
+
+# ========== PROPAGATION STUDY TOOLS ==========
+
+def get_propagation_trends(hours=24, node_id=None):
+    """Get SNR/RSSI trends over time"""
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        import time
+        cutoff_time = int(time.time()) - (hours * 3600)
+        
+        if node_id:
+            # Specific node analysis
+            c.execute("""
+                SELECT timestamp, snr, rssi, hop_limit 
+                FROM message_logs 
+                WHERE timestamp >= ? AND sender_id = ? AND snr IS NOT NULL
+                ORDER BY timestamp ASC
+            """, (cutoff_time, node_id))
+        else:
+            # All nodes average
+            c.execute("""
+                SELECT timestamp, AVG(snr) as avg_snr, AVG(rssi) as avg_rssi, COUNT(*) as msg_count
+                FROM message_logs 
+                WHERE timestamp >= ? AND snr IS NOT NULL
+                GROUP BY timestamp / 3600
+                ORDER BY timestamp ASC
+            """, (cutoff_time,))
+        
+        return c.fetchall()
+    except Exception as e:
+        logging.error(f"Error getting propagation trends: {e}")
+        return []
+
+
+def get_best_worst_conditions():
+    """Find best and worst propagation periods"""
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        # Best SNR in last 7 days
+        c.execute("""
+            SELECT sender_short_name, MAX(snr) as best_snr, timestamp
+            FROM message_logs 
+            WHERE timestamp >= ? AND snr IS NOT NULL
+            GROUP BY sender_id
+            ORDER BY best_snr DESC
+            LIMIT 10
+        """, (int(__import__('time').time()) - 604800,))
+        best = c.fetchall()
+        
+        # Worst SNR
+        c.execute("""
+            SELECT sender_short_name, MIN(snr) as worst_snr, timestamp
+            FROM message_logs 
+            WHERE timestamp >= ? AND snr IS NOT NULL
+            GROUP BY sender_id
+            ORDER BY worst_snr ASC
+            LIMIT 10
+        """, (int(__import__('time').time()) - 604800,))
+        worst = c.fetchall()
+        
+        return {'best': best, 'worst': worst}
+    except Exception as e:
+        logging.error(f"Error getting best/worst conditions: {e}")
+        return {'best': [], 'worst': []}
+
+
+def get_hourly_propagation_stats():
+    """Get average propagation by hour of day (find best times)"""
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        # Group by hour of day over last 7 days
+        c.execute("""
+            SELECT 
+                strftime('%H', datetime(timestamp, 'unixepoch', 'localtime')) as hour,
+                AVG(snr) as avg_snr,
+                AVG(rssi) as avg_rssi,
+                COUNT(*) as msg_count
+            FROM message_logs 
+            WHERE timestamp >= ? AND snr IS NOT NULL
+            GROUP BY hour
+            ORDER BY hour ASC
+        """, (int(__import__('time').time()) - 604800,))
+        
+        return c.fetchall()
+    except Exception as e:
+        logging.error(f"Error getting hourly stats: {e}")
+        return []
+
+
+def get_node_reliability(node_id):
+    """Calculate reliability metrics for a specific node"""
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        # Messages received in last 7 days
+        c.execute("""
+            SELECT COUNT(*), AVG(snr), MIN(snr), MAX(snr), AVG(rssi)
+            FROM message_logs 
+            WHERE sender_id = ? AND timestamp >= ?
+        """, (node_id, int(__import__('time').time()) - 604800))
+        
+        stats = c.fetchone()
+        return {
+            'message_count': stats[0],
+            'avg_snr': stats[1] if stats[1] else 0,
+            'min_snr': stats[2] if stats[2] else 0,
+            'max_snr': stats[3] if stats[3] else 0,
+            'avg_rssi': stats[4] if stats[4] else 0
+        }
+    except Exception as e:
+        logging.error(f"Error getting node reliability: {e}")
+        return {}

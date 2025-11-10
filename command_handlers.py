@@ -32,7 +32,11 @@ def build_menu(items, menu_name):
     menu_str = f"{menu_name}\n"
     for item in items:
         if item.strip() == 'W':
-            menu_str += "[W]eather\n"
+            # Context-aware: Weather for main menu, Wall of Shame for utilities
+            if "Utilities" in menu_name or "🛠️" in menu_name:
+                menu_str += "[W]all of Shame\n"
+            else:
+                menu_str += "[W]eather\n"
         elif item.strip() == 'N':
             menu_str += "[N]etwork Info\n"
         elif item.strip() == 'Q':
@@ -61,8 +65,8 @@ def build_menu(items, menu_name):
             menu_str += "[S]tats\n"
         elif item.strip() == 'F':
             menu_str += "[F]ortune\n"
-        elif item.strip() == 'W':
-            menu_str += "[W]all of Shame\n"
+        elif item.strip() == 'G':
+            menu_str += "[G]ames\n"
     return menu_str
 
 def handle_help_command(sender_id, interface, menu_name=None):
@@ -104,7 +108,12 @@ def handle_exit_command(sender_id, interface):
 
 
 def handle_stats_command(sender_id, interface):
-    response = "📊Stats Menu📊\nWhat stats would you like to view?\n[N]odes  [H]ardware  [R]oles  E[X]IT"
+    response = ("📊Stats Menu📊\n"
+                "[N]odes  [H]ardware  [R]oles\n"
+                "[S]NR Leaders  [D]istance\n"
+                "[C]hannel Activity  [T]op Nodes\n"
+                "[P]ropagation Analysis\n"
+                "E[X]IT")
     send_message(response, sender_id, interface)
     update_user_state(sender_id, {'command': 'STATS', 'step': 1})
 
@@ -170,6 +179,20 @@ def handle_stats_steps(sender_id, message, step, interface):
             response = "Roles:\n" + "\n".join([f"{role}: {count}" for role, count in roles.items()])
             send_message(response, sender_id, interface)
             handle_stats_command(sender_id, interface)
+        elif choice == 's':
+            handle_snr_leaderboard(sender_id, interface)
+            handle_stats_command(sender_id, interface)
+        elif choice == 'd':
+            handle_distance_records(sender_id, interface)
+            handle_stats_command(sender_id, interface)
+        elif choice == 'c':
+            handle_channel_activity(sender_id, interface)
+            handle_stats_command(sender_id, interface)
+        elif choice == 't':
+            handle_top_nodes(sender_id, interface)
+            handle_stats_command(sender_id, interface)
+        elif choice == 'p':
+            handle_propagation_analysis_command(sender_id, interface)
 
 
 def handle_bb_steps(sender_id, message, step, state, interface, bbs_nodes):
@@ -892,3 +915,362 @@ def handle_weather_steps(sender_id, message, step, state, interface):
 
         update_user_state(sender_id, None)
 
+
+
+# ========== TRIVIA GAME ==========
+def handle_trivia_command(sender_id, interface):
+    """Start trivia game"""
+    try:
+        with open('trivia.txt', 'r') as file:
+            questions = [line.strip() for line in file.readlines() if line.strip()]
+
+        if not questions:
+            send_message("No trivia questions available.", sender_id, interface)
+            return
+
+        question_line = random.choice(questions)
+        parts = question_line.split('|')
+        question = parts[0]
+        answer = parts[1]
+        category = parts[2] if len(parts) > 2 else 'A'
+
+        response = f"🎯 Meshtastic Trivia 🎯\n\n{question}\n\nReply with your answer!"
+        send_message(response, sender_id, interface)
+        update_user_state(sender_id, {'command': 'TRIVIA', 'step': 1, 'answer': answer})
+    except Exception as e:
+        logging.error(f"Error loading trivia: {e}")
+        send_message("Trivia game unavailable.", sender_id, interface)
+
+
+def handle_trivia_steps(sender_id, message, step, state, interface):
+    """Handle trivia answer"""
+    if step == 1:
+        user_answer = message.strip()
+        correct_answer = state['answer']
+
+        # Fuzzy matching - check if answer is mostly correct
+        if user_answer.lower() in correct_answer.lower() or correct_answer.lower() in user_answer.lower():
+            send_message(f"✅ Correct! The answer is: {correct_answer}\n\nPlay again? Send 'T' or type 'X' for menu.", sender_id, interface)
+        else:
+            send_message(f"❌ Not quite! The answer was: {correct_answer}\n\nTry another? Send 'T' or type 'X' for menu.", sender_id, interface)
+
+        update_user_state(sender_id, None)
+
+
+# ========== GAMES MENU ==========
+def handle_games_command(sender_id, interface):
+    """Games menu"""
+    response = "🎮 Games Menu 🎮\nWhat would you like to play?\n[T]rivia  [P]ropagation Calc  E[X]IT"
+    send_message(response, sender_id, interface)
+    update_user_state(sender_id, {'command': 'GAMES', 'step': 1})
+
+
+def handle_games_steps(sender_id, message, step, state, interface):
+    """Handle games menu selections"""
+    message = message.lower().strip()
+
+    if message == 'x':
+        handle_help_command(sender_id, interface)
+        return
+    elif message == 't':
+        handle_trivia_command(sender_id, interface)
+    elif message == 'p':
+        handle_propagation_command(sender_id, interface)
+    else:
+        handle_games_command(sender_id, interface)
+
+
+# ========== PROPAGATION CALCULATOR ==========
+def handle_propagation_command(sender_id, interface):
+    """Propagation calculator"""
+    response = "📡 Propagation Calculator 📡\n\nEnter antenna height in feet (e.g., 20):"
+    send_message(response, sender_id, interface)
+    update_user_state(sender_id, {'command': 'PROPAGATION', 'step': 1})
+
+
+def handle_propagation_steps(sender_id, message, step, state, interface):
+    """Handle propagation calculator"""
+    try:
+        if step == 1:
+            height_ft = float(message.strip())
+            # Radio horizon formula: distance (miles) ≈ 1.23 × √height_feet
+            distance_miles = 1.23 * (height_ft ** 0.5)
+
+            # Fresnel zone clearance
+            if height_ft < 10:
+                condition = "Poor - obstacles likely"
+            elif height_ft < 30:
+                condition = "Fair - some obstacles"
+            elif height_ft < 100:
+                condition = "Good - clear path likely"
+            else:
+                condition = "Excellent - long range possible"
+
+            response = (f"📡 Estimated Range 📡\n\n"
+                       f"Antenna: {height_ft:.0f} ft\n"
+                       f"Line of Sight: ~{distance_miles:.1f} mi\n"
+                       f"Condition: {condition}\n\n"
+                       f"Note: Actual range varies with terrain, weather, and obstacles.")
+
+            send_message(response, sender_id, interface)
+            update_user_state(sender_id, None)
+    except ValueError:
+        send_message("Please enter a valid number.", sender_id, interface)
+        update_user_state(sender_id, None)
+
+
+# ========== ENHANCED STATS ==========
+def handle_snr_leaderboard(sender_id, interface):
+    """Show SNR leaderboard"""
+    try:
+        # Collect SNR data from nodes
+        snr_data = []
+        for node_id, node_info in interface.nodes.items():
+            if 'snr' in node_info:
+                snr = node_info['snr']
+                name = node_info['user'].get('longName', 'Unknown')
+                short_name = node_info['user'].get('shortName', 'Unknown')
+                snr_data.append((snr, short_name, name))
+
+        if not snr_data:
+            send_message("No SNR data available yet.", sender_id, interface)
+            return
+
+        # Sort by SNR (best first)
+        snr_data.sort(reverse=True, key=lambda x: x[0])
+
+        # Top 10
+        response = "📶 SNR Leaderboard 📶\n\nBest Signals:\n"
+        for i, (snr, short, name) in enumerate(snr_data[:10], 1):
+            response += f"{i}. {short} - {snr:.1f} dB\n"
+
+        send_message(response, sender_id, interface)
+    except Exception as e:
+        logging.error(f"Error generating SNR leaderboard: {e}")
+        send_message("Error generating leaderboard.", sender_id, interface)
+
+
+def handle_distance_records(sender_id, interface):
+    """Show distance records"""
+    try:
+        import math
+
+        # Get our position
+        my_node = interface.nodes.get(interface.myInfo.my_node_num)
+        if not my_node or 'position' not in my_node:
+            send_message("GPS position not available.", sender_id, interface)
+            return
+
+        my_lat = my_node['position'].get('latitude')
+        my_lon = my_node['position'].get('longitude')
+
+        if my_lat is None or my_lon is None:
+            send_message("GPS position not available.", sender_id, interface)
+            return
+
+        # Calculate distances
+        distances = []
+        for node_id, node_info in interface.nodes.items():
+            if node_id == interface.myInfo.my_node_num:
+                continue
+
+            if 'position' in node_info:
+                lat = node_info['position'].get('latitude')
+                lon = node_info['position'].get('longitude')
+
+                if lat and lon:
+                    # Haversine formula
+                    R = 3959  # Earth radius in miles
+                    lat1, lon1 = math.radians(my_lat), math.radians(my_lon)
+                    lat2, lon2 = math.radians(lat), math.radians(lon)
+
+                    dlat = lat2 - lat1
+                    dlon = lon2 - lon1
+
+                    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+                    c = 2 * math.asin(math.sqrt(a))
+                    distance = R * c
+
+                    name = node_info['user'].get('shortName', 'Unknown')
+                    distances.append((distance, name))
+
+        if not distances:
+            send_message("No distance data available.", sender_id, interface)
+            return
+
+        # Sort by distance (farthest first)
+        distances.sort(reverse=True)
+
+        response = "🌍 Distance Records 🌍\n\nFarthest Nodes:\n"
+        for i, (dist, name) in enumerate(distances[:10], 1):
+            response += f"{i}. {name} - {dist:.1f} mi\n"
+
+        send_message(response, sender_id, interface)
+    except Exception as e:
+        logging.error(f"Error calculating distances: {e}")
+        send_message("Error calculating distances.", sender_id, interface)
+
+
+def handle_channel_activity(sender_id, interface):
+    """Show channel activity stats"""
+    try:
+        from db_operations import get_channel_activity_stats, get_message_stats
+
+        # Get stats for last 24 hours
+        channel_stats = get_channel_activity_stats(hours=24)
+        msg_stats = get_message_stats(hours=24)
+
+        response = "📻 Channel Activity (24h) 📻\n\n"
+        response += f"Total Messages: {msg_stats['total']}\n"
+        response += f"Avg SNR: {msg_stats['avg_snr']:.1f} dB\n\n"
+
+        if channel_stats:
+            response += "Messages by Channel:\n"
+            channel_names = {0: "Primary", 1: "Secondary 1", 2: "Secondary 2", 3: "Secondary 3"}
+            for channel_idx, count in channel_stats:
+                channel_name = channel_names.get(channel_idx, f"Channel {channel_idx}")
+                response += f"- {channel_name}: {count} msgs\n"
+        else:
+            response += "No channel data yet.\n"
+
+        if msg_stats['top_senders']:
+            response += f"\nTop Senders:\n"
+            for i, (sender, count) in enumerate(msg_stats['top_senders'][:5], 1):
+                response += f"{i}. {sender}: {count}\n"
+
+        send_message(response, sender_id, interface)
+    except Exception as e:
+        logging.error(f"Error showing channel activity: {e}")
+        send_message("Error retrieving channel activity.", sender_id, interface)
+
+
+def handle_top_nodes(sender_id, interface):
+    """Show most active nodes"""
+    try:
+        # Sort by lastHeard to find most recently active
+        recent_nodes = []
+        current_time = int(time.time())
+
+        for node_id, node_info in interface.nodes.items():
+            if 'lastHeard' in node_info:
+                last_heard = node_info['lastHeard']
+                minutes_ago = (current_time - last_heard) / 60
+                name = node_info['user'].get('shortName', 'Unknown')
+                snr = node_info.get('snr', 0)
+                recent_nodes.append((last_heard, name, snr, minutes_ago))
+
+        if not recent_nodes:
+            send_message("No activity data available.", sender_id, interface)
+            return
+
+        # Sort by most recent
+        recent_nodes.sort(reverse=True)
+
+        response = "⭐ Most Active Nodes ⭐\n\nRecent Activity:\n"
+        for i, (timestamp, name, snr, mins) in enumerate(recent_nodes[:10], 1):
+            if mins < 1:
+                time_str = "Just now"
+            elif mins < 60:
+                time_str = f"{mins:.0f}m ago"
+            else:
+                time_str = f"{mins/60:.1f}h ago"
+            response += f"{i}. {name} - {time_str}\n"
+
+        send_message(response, sender_id, interface)
+    except Exception as e:
+        logging.error(f"Error finding top nodes: {e}")
+        send_message("Error finding active nodes.", sender_id, interface)
+
+
+# ========== PROPAGATION ANALYSIS ==========
+def handle_propagation_analysis_command(sender_id, interface):
+    """Propagation analysis menu"""
+    response = ("📊 Propagation Analysis 📊\n"
+                "[H]ourly Trends\n"
+                "[B]est/Worst Times\n"
+                "[N]ode Reliability\n"
+                "E[X]IT")
+    send_message(response, sender_id, interface)
+    update_user_state(sender_id, {'command': 'PROP_ANALYSIS', 'step': 1})
+
+
+def handle_propagation_analysis_steps(sender_id, message, step, state, interface):
+    """Handle propagation analysis menu"""
+    message = message.lower().strip()
+    
+    if message == 'x':
+        handle_help_command(sender_id, interface)
+        return
+    elif message == 'h':
+        # Hourly trends
+        from db_operations import get_hourly_propagation_stats
+        hourly = get_hourly_propagation_stats()
+        
+        if hourly:
+            response = "📡 Best Times to Mesh 📡\n\nAvg SNR by Hour (7 days):\n"
+            for hour, avg_snr, avg_rssi, count in hourly:
+                # Convert to 12-hour format
+                hour_int = int(hour)
+                ampm = "AM" if hour_int < 12 else "PM"
+                hour_12 = hour_int if hour_int <= 12 else hour_int - 12
+                hour_12 = 12 if hour_12 == 0 else hour_12
+                
+                response += f"{hour_12:2d}{ampm}: {avg_snr:+.1f}dB ({count}msg)\n"
+            send_message(response, sender_id, interface)
+        else:
+            send_message("Not enough data yet. Check back after a few days!", sender_id, interface)
+        
+        handle_propagation_analysis_command(sender_id, interface)
+        
+    elif message == 'b':
+        # Best/worst conditions
+        from db_operations import get_best_worst_conditions
+        conditions = get_best_worst_conditions()
+        
+        response = "🏆 Propagation Records 🏆\n\nBest SNR (7 days):\n"
+        for name, snr, timestamp in conditions['best'][:5]:
+            response += f"{name}: {snr:+.1f}dB\n"
+        
+        response += "\n📉 Weakest Signals:\n"
+        for name, snr, timestamp in conditions['worst'][:5]:
+            response += f"{name}: {snr:+.1f}dB\n"
+        
+        send_message(response, sender_id, interface)
+        handle_propagation_analysis_command(sender_id, interface)
+        
+    elif message == 'n':
+        # Ask for node to analyze
+        send_message("Enter node short name to analyze (e.g., 4B80):", sender_id, interface)
+        update_user_state(sender_id, {'command': 'PROP_NODE_INPUT', 'step': 1})
+    else:
+        handle_propagation_analysis_command(sender_id, interface)
+
+
+def handle_prop_node_input_steps(sender_id, message, step, state, interface):
+    """Handle node reliability lookup"""
+    from db_operations import get_node_reliability
+    import time
+    
+    # Find node by short name
+    node_id = None
+    for nid, node_info in interface.nodes.items():
+        if node_info['user'].get('shortName', '').lower() == message.lower().strip():
+            node_id = nid
+            break
+    
+    if node_id:
+        stats = get_node_reliability(node_id)
+        if stats['message_count'] > 0:
+            response = (f"📊 {message.upper()} Reliability 📊\n\n"
+                       f"Messages (7d): {stats['message_count']}\n"
+                       f"Avg SNR: {stats['avg_snr']:+.1f}dB\n"
+                       f"Range: {stats['min_snr']:+.1f} to {stats['max_snr']:+.1f}dB\n"
+                       f"Avg RSSI: {stats['avg_rssi']:.0f}dBm\n\n"
+                       f"Signal Quality: {'Excellent' if stats['avg_snr'] > 5 else 'Good' if stats['avg_snr'] > 0 else 'Fair'}")
+        else:
+            response = f"No data for {message.upper()} in last 7 days."
+    else:
+        response = f"Node '{message}' not found."
+    
+    send_message(response, sender_id, interface)
+    update_user_state(sender_id, None)

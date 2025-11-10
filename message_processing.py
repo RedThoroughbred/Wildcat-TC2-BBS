@@ -10,9 +10,12 @@ from command_handlers import (
     handle_check_bulletin_command, handle_read_bulletin_command, handle_read_channel_command,
     handle_post_channel_command, handle_list_channels_command, handle_quick_help_command,
     handle_network_info_command, handle_network_info_steps, handle_resources_command, handle_resources_steps,
-    handle_weather_command, handle_weather_steps
+    handle_weather_command, handle_weather_steps,
+    handle_games_command, handle_games_steps, handle_trivia_command, handle_trivia_steps,
+    handle_propagation_command, handle_propagation_steps,
+    handle_propagation_analysis_command, handle_propagation_analysis_steps, handle_prop_node_input_steps
 )
-from db_operations import add_bulletin, add_mail, delete_bulletin, delete_mail, get_db_connection, add_channel
+from db_operations import add_bulletin, add_mail, delete_bulletin, delete_mail, get_db_connection, add_channel, log_message
 from js8call_integration import handle_js8call_command, handle_js8call_steps, handle_group_message_selection
 from utils import get_user_state, get_node_short_name, get_node_id_from_num, send_message
 
@@ -23,6 +26,8 @@ main_menu_handlers = {
     "b": handle_bulletin_command,
     "r": handle_resources_command,
     "q": handle_fortune_command,
+    "g": handle_games_command,
+    "u": lambda sender_id, interface: handle_help_command(sender_id, interface, 'utilities'),
     "x": handle_help_command
 }
 
@@ -193,6 +198,21 @@ def process_message(sender_id, message, interface, is_sync_message=False):
                 elif command == 'GROUP_MESSAGES':
                     handle_group_message_selection(sender_id, message, step, state, interface)
                     return
+                elif command == 'GAMES':
+                    handle_games_steps(sender_id, message, step, state, interface)
+                    return
+                elif command == 'TRIVIA':
+                    handle_trivia_steps(sender_id, message, step, state, interface)
+                    return
+                elif command == 'PROPAGATION':
+                    handle_propagation_steps(sender_id, message, step, state, interface)
+                    return
+                elif command == 'PROP_ANALYSIS':
+                    handle_propagation_analysis_steps(sender_id, message, step, state, interface)
+                    return
+                elif command == 'PROP_NODE_INPUT':
+                    handle_prop_node_input_steps(sender_id, message, step, state, interface)
+                    return
 
             # Now check menu handlers (for main menu navigation)
             if message_lower in handlers:
@@ -217,6 +237,14 @@ def on_receive(packet, interface):
             receiver_short_name = get_node_short_name(get_node_id_from_num(to_id, interface),
                                                       interface) if to_id else "Group Chat"
             logging.info(f"Received message from user '{sender_short_name}' ({sender_node_id}) to {receiver_short_name}: {message_string}")
+
+            # Log message for analytics
+            timestamp = packet.get('rxTime', int(__import__('time').time()))
+            channel_index = packet.get('channel', 0)
+            snr = packet.get('rxSnr')
+            rssi = packet.get('rxRssi')
+            hop_limit = packet.get('hopLimit')
+            log_message(sender_node_id, sender_short_name, to_id, message_string, timestamp, channel_index, snr, rssi, hop_limit)
 
             bbs_nodes = interface.bbs_nodes
             is_sync_message = any(message_string.startswith(prefix) for prefix in
